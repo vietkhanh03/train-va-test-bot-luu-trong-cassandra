@@ -1,0 +1,56 @@
+import streamlit as st
+import os
+from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
+from langchain.vectorstores.cassandra import Cassandra
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.chat_models import ChatOpenAI
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.chains import RetrievalQA
+from langchain.rerankers import LMReranker
+
+# Set OpenAI API key
+os.environ["OPENAI_API_KEY"] = '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'
+
+# Cassandra configuration
+database_mode = 'C'
+keyspace_name = 'langch'
+CASSANDRA_CONTACT_POINTS = '172.16.7.11'
+
+if database_mode == 'C':
+    if CASSANDRA_CONTACT_POINTS:
+        cluster = Cluster([cp.strip() for cp in CASSANDRA_CONTACT_POINTS.split(',') if cp.strip()])
+    else:
+        cluster = Cluster()
+    session = cluster.connect(keyspace=keyspace_name)
+
+# Initialize embeddings and vector store
+embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+#embeddings = OpenAIEmbeddings(model='text-embedding-ada-002')
+table_name = 'embedding'
+docsearch = Cassandra(embedding=embeddings, session=session, keyspace=keyspace_name, table_name=table_name)
+
+# Initialize the Q&A chatbot
+llm = ChatOpenAI(temperature=0, model_name='gpt-3.5-turbo-16k')
+reranker = LMReranker(llm)
+qa = RetrievalQA.from_chain_type(llm=llm, reranker=reranker, retriever=docsearch.as_retriever())
+
+# Streamlit web app
+def main():
+    st.title("Chat Ngưu")
+    st.write("Hãy hỏi đi và ta sẽ khai sáng!")
+
+    question = st.text_input("Your question:", "")
+    if st.button("Ask"):
+        if not question:
+            st.warning("Please enter a question!")
+        else:
+            response = qa.run(question)
+            if response:
+                st.success("Answer:")
+                st.write(response)
+            else:
+                st.warning("Sorry, I couldn't find an answer to that question.")
+
+if __name__ == "__main__":
+    main()
